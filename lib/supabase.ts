@@ -54,10 +54,8 @@ export interface EchoStats {
 // Auth helpers
 export const signInWithGoogle = async () => {
   const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${window.location.origin}/dashboard`
-    }
+    provider: 'google'
+    // No redirectTo - let Supabase use the default callback
   })
   return { data, error }
 }
