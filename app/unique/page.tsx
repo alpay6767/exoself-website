@@ -2,7 +2,7 @@
 
 import { motion, useScroll, useTransform } from 'framer-motion'
 import { useState, useEffect, useRef } from 'react'
-import Spline from '@splinetool/react-spline'
+import SplineWrapper from '../../components/SplineWrapper'
 import {
   Skull,
   Infinity as InfinityIcon,
@@ -193,7 +193,7 @@ export default function UniquePage() {
           style={{ y: y1 }}
           className="absolute right-0 top-0 w-1/2 h-full"
         >
-          <Spline
+          <SplineWrapper
             scene="https://prod.spline.design/sBTg9mFfgzsioFSG/scene.splinecode"
             className="w-full h-full"
           />

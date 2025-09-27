@@ -4,7 +4,7 @@ import { motion, useScroll, useTransform } from 'framer-motion'
 import { useState, useEffect, useRef } from 'react'
 import { Brain, Upload, Sparkles, ArrowRight, MessageSquare, ChevronRight, Bot, Heart, Zap, Shield, Cpu, Network } from 'lucide-react'
 import Link from 'next/link'
-import Spline from '@splinetool/react-spline'
+import SplineWrapper from '../components/SplineWrapper'
 import { useLanguage } from '../context/LanguageContext'
 import Header from '../components/Header'
 
@@ -33,7 +33,7 @@ export default function HomePage() {
         {/* 3D Robot Background */}
         <div className="absolute inset-0 z-0">
           <div className="absolute inset-0 backdrop-blur-[1px]">
-            <Spline
+            <SplineWrapper
               scene="https://prod.spline.design/e1bqXDWodsXpkBGO/scene.splinecode"
               style={{ width: '100%', height: '100%' }}
             />

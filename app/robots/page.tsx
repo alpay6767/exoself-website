@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion'
 import { Brain, ArrowRight, Bot, Cpu, Heart, Shield, Zap, CheckCircle2, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
-import Spline from '@splinetool/react-spline'
+import SplineWrapper from '../../components/SplineWrapper'
 import Header from '../../components/Header'
 import { useLanguage } from '../../context/LanguageContext'
 
@@ -130,7 +130,7 @@ export default function RobotsPage() {
                 {/* 3D Robot Scene for Companion, Silhouettes for others */}
                 {robot.id === 'companion' ? (
                   <div className="absolute inset-0 p-4">
-                    <Spline
+                    <SplineWrapper
                       scene="https://prod.spline.design/e1bqXDWodsXpkBGO/scene.splinecode"
                       style={{ width: '100%', height: '100%' }}
                     />
