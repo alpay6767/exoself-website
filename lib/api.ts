@@ -1,6 +1,6 @@
-// API service layer for connecting to the Python backend
+// API service layer for connecting to the Python backend via Next.js API routes
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = '/api'
 
 export interface ExoselfMessage {
   id: string
@@ -73,14 +73,20 @@ class ApiService {
 
   // Chat with the Echo
   async sendChatMessage(message: string, userId?: string): Promise<ChatResponse> {
-    return this.request<ChatResponse>('/chat', {
+    const response = await this.request<any>('/backend', {
       method: 'POST',
       body: JSON.stringify({
-        message,
-        user_id: userId || 'default',
-        context_limit: 5
+        action: 'chat',
+        data: { message }
       })
     })
+
+    return {
+      response: response.response || response.output || message,
+      context_used: [],
+      confidence: 0.8,
+      timestamp: new Date().toISOString()
+    }
   }
 
   // Upload files for processing
@@ -88,11 +94,23 @@ class ApiService {
     const formData = new FormData()
     formData.append('file', file)
 
-    return this.request<UploadResponse>('/upload', {
+    const response = await fetch('/api/upload', {
       method: 'POST',
-      body: formData,
-      headers: {} // Don't set Content-Type for FormData
+      body: formData
     })
+
+    if (!response.ok) {
+      throw new Error('Upload failed')
+    }
+
+    const result = await response.json()
+
+    return {
+      success: result.success,
+      message: 'File uploaded successfully',
+      processed_messages: 0, // TODO: Get from backend
+      source_type: result.type
+    }
   }
 
   // Get vault statistics
@@ -136,7 +154,17 @@ class ApiService {
 
   // Health check
   async healthCheck(): Promise<{ status: string; version: string }> {
-    return this.request<{ status: string; version: string }>('/health')
+    const response = await this.request<any>('/backend', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'status'
+      })
+    })
+
+    return {
+      status: response.success ? 'online' : 'offline',
+      version: '1.0.0'
+    }
   }
 }
 

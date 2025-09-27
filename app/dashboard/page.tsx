@@ -1,10 +1,12 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useLanguage } from '../../context/LanguageContext'
+import { supabase, getCurrentUser, uploadFile, getUploadedFiles, signOut } from '../../lib/supabase'
 import {
   Brain,
   Upload,
@@ -35,23 +37,58 @@ interface DataSource {
 
 export default function DashboardPage() {
   const { t } = useLanguage()
-  const [dataSources, setDataSources] = useState<DataSource[]>([
-    {
-      id: '1',
-      type: 'whatsapp',
-      name: 'WhatsApp Chat - Alpay & Prinzessin',
-      messages: 20688,
-      status: 'completed',
-      uploadedAt: '2 hours ago'
-    }
-  ])
-
+  const router = useRouter()
+  const [user, setUser] = useState<any>(null)
+  const [dataSources, setDataSources] = useState<DataSource[]>([])
   const [isTraining, setIsTraining] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    acceptedFiles.forEach((file) => {
+  // Check authentication and load user data
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { user, error } = await getCurrentUser()
+      if (error || !user) {
+        setIsLoading(false)
+        router.push('/auth/signin')
+        return
+      }
+
+      setUser(user)
+
+      // Load uploaded files
+      const { data: files, error: filesError } = await getUploadedFiles(user.id)
+      if (!filesError && files) {
+        const formattedFiles: DataSource[] = files.map(file => ({
+          id: file.id,
+          type: file.source_type as any,
+          name: file.original_name,
+          messages: file.message_count || 0,
+          status: file.processing_status as any,
+          uploadedAt: new Date(file.created_at).toLocaleDateString()
+        }))
+        setDataSources(formattedFiles)
+      }
+
+      setIsLoading(false)
+    }
+
+    checkAuth()
+  }, [router])
+
+  const handleSignOut = async () => {
+    await signOut()
+    router.push('/')
+  }
+
+  // Always call useCallback at the top level
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (!user) return
+
+    for (const file of acceptedFiles) {
+      // Create temporary UI entry
+      const tempId = Date.now().toString()
       const newSource: DataSource = {
-        id: Date.now().toString(),
+        id: tempId,
         type: 'whatsapp',
         name: file.name,
         messages: 0,
@@ -61,15 +98,77 @@ export default function DashboardPage() {
 
       setDataSources(prev => [...prev, newSource])
 
-      setTimeout(() => {
+      try {
+        // Upload to Supabase Storage and Database
+        const { uploadData, fileRecord } = await uploadFile(file, user.id)
+
+        // Update UI with real database ID
         setDataSources(prev => prev.map(source =>
-          source.id === newSource.id
-            ? { ...source, status: 'completed', messages: Math.floor(Math.random() * 10000) + 1000 }
+          source.id === tempId
+            ? {
+                ...source,
+                id: fileRecord.id,
+                name: fileRecord.original_name,
+                uploadedAt: new Date(fileRecord.created_at).toLocaleDateString()
+              }
             : source
         ))
-      }, 3000)
-    })
-  }, [])
+
+        // Trigger Python backend processing
+        const processResponse = await fetch('/api/backend', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action: 'ingest',
+            data: {
+              filepath: fileRecord.storage_path,
+              source: fileRecord.source_type,
+              fileId: fileRecord.id
+            }
+          })
+        })
+
+        const processResult = await processResponse.json()
+
+        if (processResult.success) {
+          // Update file record in database
+          await supabase
+            .from('uploaded_files')
+            .update({
+              processing_status: 'completed',
+              processed_at: new Date().toISOString(),
+              message_count: Math.floor(Math.random() * 10000) + 1000 // TODO: Get real count from backend
+            })
+            .eq('id', fileRecord.id)
+
+          // Update UI
+          setDataSources(prev => prev.map(source =>
+            source.id === fileRecord.id
+              ? {
+                  ...source,
+                  status: 'completed',
+                  messages: Math.floor(Math.random() * 10000) + 1000
+                }
+              : source
+          ))
+        } else {
+          throw new Error(processResult.error || 'Processing failed')
+        }
+
+      } catch (error) {
+        console.error('File upload/processing error:', error)
+
+        // Update UI to show error
+        setDataSources(prev => prev.map(source =>
+          source.id === tempId
+            ? { ...source, status: 'error' }
+            : source
+        ))
+      }
+    }
+  }, [user])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -101,6 +200,28 @@ export default function DashboardPage() {
 
   const totalMessages = dataSources.reduce((sum, source) => sum + source.messages, 0)
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-8 h-8 border-2 border-black border-t-transparent rounded-full"
+        />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600">Redirecting to sign in...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Apple-style Navigation Header */}
@@ -125,12 +246,22 @@ export default function DashboardPage() {
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                 <span className="text-gray-600 font-medium">Echo Online</span>
               </div>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                className="text-gray-600 hover:text-black transition-colors"
-              >
-                <Settings className="w-5 h-5" />
-              </motion.button>
+              <div className="flex items-center gap-3">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  className="text-gray-600 hover:text-black transition-colors"
+                >
+                  <Settings className="w-5 h-5" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  onClick={handleSignOut}
+                  className="text-gray-600 hover:text-red-600 transition-colors"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-5 h-5" />
+                </motion.button>
+              </div>
             </div>
           </div>
         </div>

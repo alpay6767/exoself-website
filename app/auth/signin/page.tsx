@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Brain, ArrowLeft, Mail, Shield, Zap } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
+import { signInWithGoogle } from '../../../lib/supabase'
 import Header from '../../../components/Header'
 import { useLanguage } from '../../../context/LanguageContext'
 
@@ -13,12 +14,17 @@ export default function SignInPage() {
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true)
-    // Implement Google OAuth here
-    setTimeout(() => {
+    try {
+      const { error } = await signInWithGoogle()
+      if (error) {
+        console.error('Sign in error:', error)
+        setIsLoading(false)
+      }
+      // Success - Supabase will automatically redirect to dashboard
+    } catch (error) {
+      console.error('Sign in error:', error)
       setIsLoading(false)
-      // Redirect to dashboard
-      window.location.href = '/dashboard'
-    }, 2000)
+    }
   }
 
   return (
