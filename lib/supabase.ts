@@ -53,13 +53,10 @@ export interface EchoStats {
 
 // Auth helpers
 export const signInWithGoogle = async () => {
-  // Get the current origin (works for both localhost and production)
-  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://exoself.me'
-
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${currentOrigin}/dashboard`
+      redirectTo: `${window.location.origin}/dashboard`
     }
   })
   return { data, error }
