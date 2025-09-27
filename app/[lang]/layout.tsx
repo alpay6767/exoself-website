@@ -3,7 +3,7 @@ import { translations } from '../../lib/translations'
 
 type Props = {
   children: React.ReactNode
-  params: { lang: string }
+  params: Promise<{ lang: string }>
 }
 
 export async function generateStaticParams() {
@@ -14,10 +14,11 @@ export async function generateStaticParams() {
   ]
 }
 
-export default function LanguageLayout({ children, params }: Props) {
+export default async function LanguageLayout({ children, params }: Props) {
   // Validate language parameter
-  const lang = params.lang?.toUpperCase()
-  if (!lang || !translations[lang as keyof typeof translations]) {
+  const { lang } = await params
+  const langUpper = lang?.toUpperCase()
+  if (!langUpper || !translations[langUpper as keyof typeof translations]) {
     return <div>Invalid language</div>
   }
 
