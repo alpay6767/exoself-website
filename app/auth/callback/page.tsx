@@ -20,7 +20,20 @@ export default function AuthCallback() {
         }
 
         if (session) {
-          // Successfully authenticated - redirect to dashboard on current domain
+          // Check if we need to redirect to a different domain
+          const storedOrigin = sessionStorage.getItem('auth_origin_domain')
+          const currentOrigin = window.location.origin
+
+          // Clear the stored origin
+          sessionStorage.removeItem('auth_origin_domain')
+
+          if (storedOrigin && storedOrigin !== currentOrigin) {
+            // Redirect to the original domain's dashboard
+            window.location.href = `${storedOrigin}/dashboard`
+            return
+          }
+
+          // Stay on current domain
           router.push('/dashboard')
         } else {
           // No session - redirect to signin

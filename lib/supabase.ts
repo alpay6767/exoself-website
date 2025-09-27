@@ -53,9 +53,18 @@ export interface EchoStats {
 
 // Auth helpers
 export const signInWithGoogle = async () => {
+  // Store the current domain before OAuth to preserve it after callback
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('auth_origin_domain', window.location.origin)
+  }
+
   const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google'
-    // No redirectTo - let Supabase use the default callback
+    provider: 'google',
+    options: {
+      redirectTo: typeof window !== 'undefined'
+        ? `${window.location.origin}/auth/callback`
+        : 'https://exoself.me/auth/callback'
+    }
   })
   return { data, error }
 }
