@@ -5,19 +5,18 @@ import { useLanguage } from '../../../../context/LanguageContext'
 import SignInPage from '../../../auth/signin/page'
 
 type Props = {
-  params: Promise<{ lang: string }>
+  params: { lang: string }
 }
 
 export default function LanguageSignInPage({ params }: Props) {
   const { setSelectedLanguage } = useLanguage()
 
   useEffect(() => {
-    params.then(({ lang }) => {
-      const langUpper = lang?.toUpperCase()
-      if (langUpper && ['EN', 'DE', 'JA'].includes(langUpper)) {
-        setSelectedLanguage(langUpper as any)
-      }
-    })
+    const { lang } = params
+    const langUpper = lang?.toUpperCase()
+    if (langUpper && ['EN', 'DE', 'JA'].includes(langUpper)) {
+      setSelectedLanguage(langUpper as any)
+    }
   }, [params, setSelectedLanguage])
 
   return <SignInPage />
