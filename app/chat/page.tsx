@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { apiService, checkBackendConnection } from '../../lib/api'
+import AuthGuard, { useAuthGuard } from '../../components/AuthGuard'
 
 interface Message {
   id: string
@@ -30,7 +31,8 @@ interface Message {
   isTyping?: boolean
 }
 
-export default function ChatPage() {
+function ChatPageContent() {
+  const { user } = useAuthGuard()
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -416,5 +418,13 @@ export default function ChatPage() {
         </div>
       </div>
     </main>
+  )
+}
+
+export default function ChatPage() {
+  return (
+    <AuthGuard>
+      <ChatPageContent />
+    </AuthGuard>
   )
 }

@@ -5,11 +5,42 @@ import { useState, useEffect, useRef } from 'react'
 import { Brain, Globe, Check, Settings } from 'lucide-react'
 import Link from 'next/link'
 import { useLanguage } from '../context/LanguageContext'
+import { getCurrentUser, supabase } from '../lib/supabase'
+import UserMenu, { LoginPrompt } from './UserMenu'
 
 export default function Header() {
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false)
+  const [user, setUser] = useState<any>(null)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const languageDropdownRef = useRef<HTMLDivElement>(null)
   const { selectedLanguage, setSelectedLanguage, t, languages } = useLanguage()
+
+  // Check authentication status
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { user } = await getCurrentUser()
+        setUser(user)
+      } catch (error) {
+        console.error('Auth check failed:', error)
+      } finally {
+        setIsCheckingAuth(false)
+      }
+    }
+
+    checkAuth()
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+      } else if (event === 'SIGNED_IN' && session) {
+        setUser(session.user)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -54,12 +85,17 @@ export default function Header() {
             <Link href={`/${selectedLanguage.toLowerCase()}/robots`} className="text-gray-600 hover:text-black transition-colors">
               {t.nav.robotBodies}
             </Link>
-            <Link href={`/${selectedLanguage.toLowerCase()}/dashboard`} className="text-gray-600 hover:text-black transition-colors">
-              {t.nav.dashboard}
-            </Link>
-            <Link href={`/${selectedLanguage.toLowerCase()}/chat`} className="text-gray-600 hover:text-black transition-colors">
-              {t.nav.chat}
-            </Link>
+            {/* Protected links - only show for authenticated users */}
+            {user && (
+              <>
+                <Link href={`/${selectedLanguage.toLowerCase()}/dashboard`} className="text-gray-600 hover:text-black transition-colors">
+                  {t.nav.dashboard}
+                </Link>
+                <Link href={`/${selectedLanguage.toLowerCase()}/chat`} className="text-gray-600 hover:text-black transition-colors">
+                  {t.nav.chat}
+                </Link>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -105,15 +141,14 @@ export default function Header() {
               )}
             </div>
 
-            <Link href={`/${selectedLanguage.toLowerCase()}/auth/signin`}>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="bg-black text-white px-6 py-2 rounded-full text-sm font-medium hover:bg-gray-800 transition-colors"
-              >
-                {t.nav.getStarted}
-              </motion.button>
-            </Link>
+            {/* Authentication UI */}
+            {isCheckingAuth ? (
+              <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse" />
+            ) : user ? (
+              <UserMenu user={user} showName={true} />
+            ) : (
+              <LoginPrompt />
+            )}
           </div>
         </div>
       </div>

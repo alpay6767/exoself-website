@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLanguage } from '../../context/LanguageContext'
 import { supabase, getCurrentUser, uploadFile, getUploadedFiles, signOut } from '../../lib/supabase'
+import AuthGuard, { useAuthGuard } from '../../components/AuthGuard'
+import Header from '../../components/Header'
 import {
   Brain,
   Upload,
@@ -35,50 +37,44 @@ interface DataSource {
   uploadedAt: string
 }
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const { t } = useLanguage()
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, isLoading: authLoading } = useAuthGuard()
   const [dataSources, setDataSources] = useState<DataSource[]>([])
   const [isTraining, setIsTraining] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Check authentication and load user data
+  // Load user-specific data
   useEffect(() => {
-    const checkAuth = async () => {
-      const { user, error } = await getCurrentUser()
-      if (error || !user) {
+    const loadUserData = async () => {
+      if (!user) return
+
+      try {
+        // Load uploaded files for the current user
+        const { data: files, error: filesError } = await getUploadedFiles(user.id)
+        if (!filesError && files) {
+          const formattedFiles: DataSource[] = files.map(file => ({
+            id: file.id,
+            type: file.source_type as any,
+            name: file.original_name,
+            messages: file.message_count || 0,
+            status: file.processing_status as any,
+            uploadedAt: new Date(file.created_at).toLocaleDateString()
+          }))
+          setDataSources(formattedFiles)
+        }
+      } catch (error) {
+        console.error('Error loading user data:', error)
+      } finally {
         setIsLoading(false)
-        router.push('/auth/signin')
-        return
       }
-
-      setUser(user)
-
-      // Load uploaded files
-      const { data: files, error: filesError } = await getUploadedFiles(user.id)
-      if (!filesError && files) {
-        const formattedFiles: DataSource[] = files.map(file => ({
-          id: file.id,
-          type: file.source_type as any,
-          name: file.original_name,
-          messages: file.message_count || 0,
-          status: file.processing_status as any,
-          uploadedAt: new Date(file.created_at).toLocaleDateString()
-        }))
-        setDataSources(formattedFiles)
-      }
-
-      setIsLoading(false)
     }
 
-    checkAuth()
-  }, [router])
-
-  const handleSignOut = async () => {
-    await signOut()
-    router.push('/')
-  }
+    if (user && !authLoading) {
+      loadUserData()
+    }
+  }, [user, authLoading])
 
   // Always call useCallback at the top level
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -200,7 +196,7 @@ export default function DashboardPage() {
 
   const totalMessages = dataSources.reduce((sum, source) => sum + source.messages, 0)
 
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <motion.div
@@ -212,60 +208,10 @@ export default function DashboardPage() {
     )
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600">Redirecting to sign in...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <main className="min-h-screen bg-gray-50">
-      {/* Apple-style Navigation Header */}
-      <div className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex justify-between items-center">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center">
-                <Brain className="w-4 h-4 text-white" strokeWidth={2} />
-              </div>
-              <span className="text-xl font-semibold text-black">Exoself</span>
-            </Link>
-
-            <nav className="hidden md:flex items-center gap-8">
-              <Link href="/dashboard" className="text-black font-medium border-b-2 border-black pb-1">Dashboard</Link>
-              <Link href="/chat" className="text-gray-600 hover:text-black transition-colors">Chat</Link>
-              <Link href="/robots" className="text-gray-600 hover:text-black transition-colors">Robot Bodies</Link>
-            </nav>
-
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-2 text-sm">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-gray-600 font-medium">Echo Online</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  className="text-gray-600 hover:text-black transition-colors"
-                >
-                  <Settings className="w-5 h-5" />
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  onClick={handleSignOut}
-                  className="text-gray-600 hover:text-red-600 transition-colors"
-                  title="Sign Out"
-                >
-                  <LogOut className="w-5 h-5" />
-                </motion.button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Use consistent header */}
+      <Header />
 
       {/* Main Content */}
       <div className="pt-20 pb-12">
@@ -273,7 +219,7 @@ export default function DashboardPage() {
           {/* Header */}
           <div className="mb-12">
             <h1 className="text-4xl md:text-5xl font-bold text-black mb-4 tracking-tight">
-              {t.dashboard.title.replace('{name}', 'Alpay')}
+              {t.dashboard.title.replace('{name}', user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User')}
             </h1>
             <p className="text-xl text-gray-600 font-normal">
               {t.dashboard.subtitle.replace('{count}', totalMessages.toLocaleString())}
@@ -482,5 +428,13 @@ export default function DashboardPage() {
         </div>
       </div>
     </main>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <AuthGuard>
+      <DashboardPageContent />
+    </AuthGuard>
   )
 }

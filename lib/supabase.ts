@@ -63,7 +63,10 @@ export const signInWithGoogle = async () => {
     options: {
       redirectTo: typeof window !== 'undefined'
         ? `${window.location.origin}/auth/callback`
-        : 'https://exoself.me/auth/callback'
+        : 'https://exoself.me/auth/callback',
+      queryParams: {
+        prompt: 'select_account',
+      },
     }
   })
   return { data, error }
