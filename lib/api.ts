@@ -1,5 +1,7 @@
 // API service layer for connecting to the Python backend via Next.js API routes
 
+import { supabase } from './supabase'
+
 const API_BASE_URL = '/api'
 
 export interface ExoselfMessage {
@@ -41,12 +43,25 @@ export interface VaultStats {
 }
 
 class ApiService {
+  private async getAuthHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await supabase.auth.getSession()
+
+    if (session?.access_token) {
+      return {
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    }
+
+    return {}
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`
 
+    const authHeaders = await this.getAuthHeaders()
     const defaultHeaders = {
       'Content-Type': 'application/json',
     }
@@ -56,6 +71,7 @@ class ApiService {
         ...options,
         headers: {
           ...defaultHeaders,
+          ...authHeaders,
           ...options.headers,
         },
       })

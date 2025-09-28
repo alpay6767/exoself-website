@@ -29,6 +29,7 @@ export interface UploadedFile {
   created_at: string
   processed_at?: string
   error_message?: string
+  last_trained_at?: string
 }
 
 export interface ChatMessage {
@@ -82,42 +83,48 @@ export const getCurrentUser = async () => {
   return { user, error }
 }
 
-// File upload helpers
+// File upload helpers - Updated to use new v2 API
 export const uploadFile = async (file: File, userId: string) => {
-  const filename = `${Date.now()}-${file.name}`
-  const filePath = `uploads/${userId}/${filename}`
+  // Get current session
+  const { data: { session } } = await supabase.auth.getSession()
 
-  // Upload to Supabase Storage
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('user-files')
-    .upload(filePath, file)
-
-  if (uploadError) {
-    throw uploadError
+  if (!session?.access_token) {
+    throw new Error('Not authenticated')
   }
 
-  // Insert file record into database
-  const { data: fileRecord, error: dbError } = await supabase
-    .from('uploaded_files')
-    .insert({
-      user_id: userId,
-      filename,
-      original_name: file.name,
-      file_type: file.type,
-      file_size: file.size,
-      storage_path: filePath,
+  // Use the new v2 API endpoint which handles everything
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch('/api/process-file-v2', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`
+    },
+    body: formData
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.error || 'Upload failed')
+  }
+
+  const result = await response.json()
+
+  // Return in the expected format
+  return {
+    uploadData: { path: `${userId}/${result.fileName}` },
+    fileRecord: {
+      id: result.fileId,
+      original_name: result.fileName,
       processing_status: 'pending',
-      source_type: 'whatsapp' // TODO: Auto-detect from file content
-    })
-    .select()
-    .single()
-
-  if (dbError) {
-    throw dbError
+      created_at: new Date().toISOString()
+    }
   }
-
-  return { uploadData, fileRecord }
 }
+
+// Note: triggerFileProcessing is now handled directly by uploadFile via /api/process-file-v2
+// This function is no longer needed as the new API handles everything in one call
 
 // Database helpers
 export const getUserProfile = async (userId: string) => {
@@ -162,11 +169,27 @@ export const saveChatMessage = async (message: Omit<ChatMessage, 'id'>) => {
 }
 
 export const getEchoStats = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('echo_stats')
-    .select('*')
-    .eq('user_id', userId)
-    .single()
+  try {
+    const { data, error } = await supabase
+      .from('echo_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .single()
 
-  return { data, error }
+    return { data, error }
+  } catch (error: any) {
+    // If table doesn't exist, return default stats
+    if (error?.code === 'PGRST106' || error?.status === 406) {
+      return {
+        data: {
+          total_messages: 0,
+          accuracy_score: 0,
+          last_trained: null,
+          data_sources: []
+        },
+        error: null
+      }
+    }
+    return { data: null, error }
+  }
 }

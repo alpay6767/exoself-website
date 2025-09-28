@@ -25,16 +25,20 @@ import {
   Play,
   Pause,
   Zap,
-  ChevronRight
+  ChevronRight,
+  Image
 } from 'lucide-react'
 
 interface DataSource {
   id: string
-  type: 'whatsapp' | 'sms' | 'email' | 'social'
+  type: 'whatsapp' | 'sms' | 'email' | 'social' | 'image'
   name: string
   messages: number
-  status: 'processing' | 'completed' | 'error'
+  status: 'pending' | 'processing' | 'completed' | 'error'
   uploadedAt: string
+  errorMessage?: string
+  lastTrainedAt?: string
+  needsTraining?: boolean
 }
 
 function DashboardPageContent() {
@@ -46,46 +50,61 @@ function DashboardPageContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [echoStats, setEchoStats] = useState<any>(null)
 
-  // Load user-specific data
-  useEffect(() => {
-    const loadUserData = async () => {
-      if (!user) return
+  // Check if there are new files that need training
+  const hasNewFilesToTrain = dataSources.some(source => source.needsTraining)
+  const hasAnyCompletedFiles = dataSources.some(source => source.status === 'completed')
+  const canTrain = hasAnyCompletedFiles && !isTraining
 
-      try {
-        // Load uploaded files for the current user
-        const { data: files, error: filesError } = await getUploadedFiles(user.id)
-        if (!filesError && files) {
-          const formattedFiles: DataSource[] = files.map(file => ({
+  // Load user data function (moved here so pollProcessingStatus can access it)
+  const loadUserData = async () => {
+    if (!user) return
+
+    try {
+      // Load uploaded files for the current user
+      const { data: files, error: filesError } = await getUploadedFiles(user.id)
+      if (!filesError && files) {
+        const formattedFiles: DataSource[] = files.map(file => {
+          const isCompleted = file.processing_status === 'completed'
+          const hasBeenTrained = file.last_trained_at != null
+          const needsTraining = isCompleted && !hasBeenTrained
+
+          return {
             id: file.id,
             type: file.source_type as any,
             name: file.original_name,
             messages: file.message_count || 0,
             status: file.processing_status as any,
-            uploadedAt: new Date(file.created_at).toLocaleDateString()
-          }))
-          setDataSources(formattedFiles)
-        }
-
-        // Load echo statistics for the current user
-        const { data: stats, error: statsError } = await getEchoStats(user.id)
-        if (!statsError && stats) {
-          setEchoStats(stats)
-        } else {
-          // Create default stats if none exist
-          setEchoStats({
-            total_messages: 0,
-            accuracy_score: 0,
-            last_trained: null,
-            data_sources: []
-          })
-        }
-      } catch (error) {
-        console.error('Error loading user data:', error)
-      } finally {
-        setIsLoading(false)
+            uploadedAt: new Date(file.created_at).toLocaleDateString(),
+            errorMessage: file.error_message || undefined,
+            lastTrainedAt: file.last_trained_at,
+            needsTraining
+          }
+        })
+        setDataSources(formattedFiles)
       }
-    }
 
+      // Load echo statistics for the current user
+      const { data: stats, error: statsError } = await getEchoStats(user.id)
+      if (!statsError && stats) {
+        setEchoStats(stats)
+      } else {
+        // Create default stats if none exist
+        setEchoStats({
+          total_messages: 0,
+          accuracy_score: 0,
+          last_trained: null,
+          data_sources: []
+        })
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Load user-specific data
+  useEffect(() => {
     if (user && !authLoading) {
       loadUserData()
     }
@@ -96,13 +115,17 @@ function DashboardPageContent() {
     if (!user) return
 
     for (const file of acceptedFiles) {
+      // Determine file type based on MIME type
+      const isImage = file.type.startsWith('image/')
+      const fileType = isImage ? 'image' : 'whatsapp' // Default to whatsapp for non-images
+
       // Create temporary UI entry
       const tempId = Date.now().toString()
       const newSource: DataSource = {
         id: tempId,
-        type: 'whatsapp',
+        type: fileType,
         name: file.name,
-        messages: 0,
+        messages: isImage ? 1 : 0, // Images count as 1 "message" initially
         status: 'processing',
         uploadedAt: 'Just now'
       }
@@ -110,83 +133,157 @@ function DashboardPageContent() {
       setDataSources(prev => [...prev, newSource])
 
       try {
-        // Upload to Supabase Storage and Database
+        // Upload to Supabase Storage and Database (this will also trigger processing)
         const { uploadData, fileRecord } = await uploadFile(file, user.id)
 
-        // Update UI with real database ID
+        // Update UI with real database ID and initial status
         setDataSources(prev => prev.map(source =>
           source.id === tempId
             ? {
                 ...source,
                 id: fileRecord.id,
                 name: fileRecord.original_name,
+                status: fileRecord.processing_status as any,
                 uploadedAt: new Date(fileRecord.created_at).toLocaleDateString()
               }
             : source
         ))
 
-        // Trigger Python backend processing
-        const processResponse = await fetch('/api/backend', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            action: 'ingest',
-            data: {
-              filepath: fileRecord.storage_path,
-              source: fileRecord.source_type,
-              fileId: fileRecord.id
-            }
-          })
-        })
-
-        const processResult = await processResponse.json()
-
-        if (processResult.success) {
-          // Update file record in database
-          await supabase
-            .from('uploaded_files')
-            .update({
-              processing_status: 'completed',
-              processed_at: new Date().toISOString(),
-              message_count: Math.floor(Math.random() * 10000) + 1000 // TODO: Get real count from backend
-            })
-            .eq('id', fileRecord.id)
-
-          // Update UI
-          setDataSources(prev => prev.map(source =>
-            source.id === fileRecord.id
-              ? {
-                  ...source,
-                  status: 'completed',
-                  messages: Math.floor(Math.random() * 10000) + 1000
-                }
-              : source
-          ))
-        } else {
-          throw new Error(processResult.error || 'Processing failed')
-        }
+        // Set up polling to check processing status
+        pollProcessingStatus(fileRecord.id)
 
       } catch (error) {
-        console.error('File upload/processing error:', error)
+        console.error('File upload error:', error)
 
         // Update UI to show error
         setDataSources(prev => prev.map(source =>
           source.id === tempId
-            ? { ...source, status: 'error' }
+            ? {
+                ...source,
+                status: 'error',
+                errorMessage: error instanceof Error ? error.message : 'Upload failed'
+              }
             : source
         ))
       }
     }
   }, [user])
 
+  // Function to poll processing status
+  const pollProcessingStatus = async (fileId: string) => {
+    const maxAttempts = 30 // Poll for up to 5 minutes (30 attempts * 10 seconds)
+    let attempts = 0
+
+    const poll = async () => {
+      try {
+        const { data: file, error } = await supabase
+          .from('uploaded_files')
+          .select('processing_status, message_count, error_message')
+          .eq('id', fileId)
+          .single()
+
+        if (error) {
+          console.error('Error polling status:', error)
+          return
+        }
+
+        // Update UI with current status
+        setDataSources(prev => prev.map(source =>
+          source.id === fileId
+            ? {
+                ...source,
+                status: file.processing_status as any,
+                messages: file.message_count || 0,
+                errorMessage: file.error_message || undefined
+              }
+            : source
+        ))
+
+        // If processing is complete or failed, stop polling
+        if (file.processing_status === 'completed' || file.processing_status === 'error') {
+          if (file.processing_status === 'completed') {
+            // Refresh echo stats when processing completes
+            loadUserData()
+          }
+          return
+        }
+
+        // Continue polling if still processing
+        attempts++
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 2000) // Poll every 2 seconds
+        } else {
+          // Timeout - mark as error
+          setDataSources(prev => prev.map(source =>
+            source.id === fileId
+              ? {
+                  ...source,
+                  status: 'error',
+                  errorMessage: 'Processing timeout'
+                }
+              : source
+          ))
+        }
+      } catch (error) {
+        console.error('Polling error:', error)
+      }
+    }
+
+    // Start polling after a short delay
+    setTimeout(poll, 1000)
+  }
+
+  // Handle echo training
+  const handleTrainEcho = async () => {
+    if (!user || isTraining) return
+
+    setIsTraining(true)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session?.access_token) {
+        throw new Error('Not authenticated')
+      }
+
+      const response = await fetch('/api/train-echo-v2', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Training failed')
+      }
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Update echo stats with training results
+        await loadUserData()
+        alert(`🎉 Echo training completed!\n\n📊 Processed ${result.messagesProcessed} messages\n🧠 Identified personality traits: ${result.personalityTraits?.join(', ') || 'None'}`)
+      } else {
+        throw new Error(result.error || 'Training failed')
+      }
+
+    } catch (error) {
+      console.error('Echo training error:', error)
+      alert(`❌ Training failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsTraining(false)
+    }
+  }
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'text/plain': ['.txt'],
       'application/json': ['.json'],
-      'text/csv': ['.csv']
+      'text/csv': ['.csv'],
+      'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic']
     }
   })
 
@@ -196,6 +293,7 @@ function DashboardPageContent() {
       case 'sms': return <Smartphone className="w-5 h-5" />
       case 'email': return <Mail className="w-5 h-5" />
       case 'social': return <Instagram className="w-5 h-5" />
+      case 'image': return <Image className="w-5 h-5" />
       default: return <FileText className="w-5 h-5" />
     }
   }
@@ -302,7 +400,7 @@ function DashboardPageContent() {
                   {isDragActive ? 'Drop files here' : 'Drop files to upload'}
                 </p>
                 <p className="text-gray-600 text-sm">
-                  WhatsApp, SMS, Email exports (.txt, .json, .csv)
+                  Chat logs, Photos & Images (.txt, .json, .csv, .jpg, .png, .heic)
                 </p>
               </div>
 
@@ -351,16 +449,52 @@ function DashboardPageContent() {
                 </Link>
 
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setIsTraining(!isTraining)}
-                  className="w-full bg-gray-100 hover:bg-gray-200 text-black p-4 rounded-xl flex items-center justify-between transition-colors"
+                  whileHover={{ scale: canTrain ? 1.02 : 1 }}
+                  whileTap={{ scale: canTrain ? 0.98 : 1 }}
+                  onClick={handleTrainEcho}
+                  disabled={!canTrain}
+                  className={`w-full p-4 rounded-xl flex items-center justify-between transition-all ${
+                    isTraining
+                      ? 'bg-purple-100 text-purple-700 cursor-not-allowed'
+                      : !canTrain
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : hasNewFilesToTrain
+                      ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 shadow-lg animate-pulse'
+                      : 'bg-gradient-to-r from-purple-500 to-cyan-500 text-white hover:from-purple-600 hover:to-cyan-600'
+                  }`}
                 >
                   <div className="flex items-center gap-3">
-                    {isTraining ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                    <span className="font-medium">{isTraining ? 'Pause Training' : 'Train Echo'}</span>
+                    {isTraining ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-5 h-5 border-2 border-purple-700 border-t-transparent rounded-full"
+                      />
+                    ) : hasNewFilesToTrain ? (
+                      <Zap className="w-5 h-5" />
+                    ) : (
+                      <Brain className="w-5 h-5" />
+                    )}
+                    <span className="font-medium">
+                      {isTraining
+                        ? 'Training Echo...'
+                        : !canTrain
+                        ? 'No Data Available'
+                        : hasNewFilesToTrain
+                        ? 'Train Echo with New Data!'
+                        : 'Retrain Echo'
+                      }
+                    </span>
                   </div>
-                  <ChevronRight className="w-5 h-5" />
+                  {hasNewFilesToTrain && !isTraining && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-white bg-opacity-20 px-2 py-1 rounded-full">
+                        NEW
+                      </span>
+                      <ChevronRight className="w-5 h-5" />
+                    </div>
+                  )}
+                  {!hasNewFilesToTrain && canTrain && <ChevronRight className="w-5 h-5" />}
                 </motion.button>
 
                 <motion.button
@@ -398,16 +532,32 @@ function DashboardPageContent() {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.1 }}
-                  className="flex items-center justify-between p-6 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                  className={`flex items-center justify-between p-6 rounded-xl transition-colors ${
+                    source.needsTraining
+                      ? 'bg-orange-50 border-2 border-orange-200 hover:bg-orange-100'
+                      : 'bg-gray-50 hover:bg-gray-100'
+                  }`}
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm">
                       {getIcon(source.type)}
                     </div>
                     <div>
-                      <h3 className="text-black font-semibold">{source.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-black font-semibold">{source.name}</h3>
+                        {source.needsTraining && (
+                          <span className="text-xs bg-orange-500 text-white px-2 py-1 rounded-full">
+                            NEW
+                          </span>
+                        )}
+                      </div>
                       <p className="text-gray-600 text-sm">
                         {source.messages.toLocaleString()} messages • {source.uploadedAt}
+                        {source.lastTrainedAt && (
+                          <span className="text-green-600 ml-2">
+                            • Trained {new Date(source.lastTrainedAt).toLocaleDateString()}
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
