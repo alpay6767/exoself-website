@@ -7,12 +7,15 @@ import Link from 'next/link'
 import SplineWrapper from '../components/SplineWrapper'
 import { useLanguage } from '../context/LanguageContext'
 import Header from '../components/Header'
+import { getCurrentUser } from '../lib/supabase'
+import { useRouter } from 'next/navigation'
 
 export default function HomePage() {
   const [scrollY, setScrollY] = useState(0)
   const heroRef = useRef(null)
   const { scrollYProgress } = useScroll()
   const { selectedLanguage, t } = useLanguage()
+  const router = useRouter()
 
   const heroOpacity = useTransform(scrollYProgress, [0, 0.3], [1, 0])
   const heroScale = useTransform(scrollYProgress, [0, 0.3], [1, 0.98])
@@ -22,6 +25,23 @@ export default function HomePage() {
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
+
+  // Smart redirect function that checks auth state
+  const handleCTAClick = async () => {
+    try {
+      const { user } = await getCurrentUser()
+      if (user) {
+        // User is logged in, redirect to dashboard
+        router.push(`/${selectedLanguage.toLowerCase()}/dashboard`)
+      } else {
+        // User is not logged in, redirect to signin
+        router.push(`/${selectedLanguage.toLowerCase()}/auth/signin`)
+      }
+    } catch (error) {
+      // If there's an error checking auth, fallback to signin
+      router.push(`/${selectedLanguage.toLowerCase()}/auth/signin`)
+    }
+  }
 
   return (
     <main className="relative bg-white">
@@ -72,15 +92,14 @@ export default function HomePage() {
             transition={{ duration: 0.8, delay: 0.6 }}
             className="flex flex-col sm:flex-row gap-4 justify-center items-center pointer-events-auto"
           >
-            <Link href={`/${selectedLanguage.toLowerCase()}/auth/signin`}>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="bg-white text-black px-8 py-4 rounded-full text-lg font-medium hover:bg-gray-100 transition-all shadow-xl backdrop-blur-sm"
-              >
-{t.hero.startButton}
-              </motion.button>
-            </Link>
+            <motion.button
+              onClick={handleCTAClick}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="bg-white text-black px-8 py-4 rounded-full text-lg font-medium hover:bg-gray-100 transition-all shadow-xl backdrop-blur-sm"
+            >
+              {t.hero.startButton}
+            </motion.button>
 
             <Link href="#features">
               <motion.button
@@ -315,16 +334,15 @@ export default function HomePage() {
               {t.sections.cta.subtitle}
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Link href={`/${selectedLanguage.toLowerCase()}/auth/signin`}>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="bg-black text-white px-10 py-4 rounded-full text-lg font-medium hover:bg-gray-800 transition-all shadow-lg inline-flex items-center gap-3"
-                >
-                  {t.sections.cta.getStartedButton}
-                  <ArrowRight className="w-6 h-6" />
-                </motion.button>
-              </Link>
+              <motion.button
+                onClick={handleCTAClick}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="bg-black text-white px-10 py-4 rounded-full text-lg font-medium hover:bg-gray-800 transition-all shadow-lg inline-flex items-center gap-3"
+              >
+                {t.sections.cta.getStartedButton}
+                <ArrowRight className="w-6 h-6" />
+              </motion.button>
               <Link href="#how-it-works">
                 <motion.button
                   whileHover={{ scale: 1.02 }}

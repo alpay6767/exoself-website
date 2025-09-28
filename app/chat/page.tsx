@@ -22,6 +22,7 @@ import {
 import Link from 'next/link'
 import { apiService, checkBackendConnection } from '../../lib/api'
 import AuthGuard, { useAuthGuard } from '../../components/AuthGuard'
+import { getEchoStats, getUploadedFiles } from '../../lib/supabase'
 
 interface Message {
   id: string
@@ -46,6 +47,7 @@ function ChatPageContent() {
   const [isEchoTyping, setIsEchoTyping] = useState(false)
   const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [userStats, setUserStats] = useState<any>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -53,9 +55,10 @@ function ChatPageContent() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // Check backend connection on mount
+  // Load user stats and check backend connection on mount
   useEffect(() => {
-    const checkConnection = async () => {
+    const initializeData = async () => {
+      // Check backend connection
       try {
         const connected = await checkBackendConnection()
         setIsBackendConnected(connected)
@@ -66,10 +69,31 @@ function ChatPageContent() {
         setIsBackendConnected(false)
         setConnectionError('Failed to connect to backend server.')
       }
+
+      // Load user statistics if user is available
+      if (user) {
+        try {
+          const { data: stats, error } = await getEchoStats(user.id)
+          if (!error && stats) {
+            setUserStats(stats)
+          } else {
+            // Get file count as fallback
+            const { data: files } = await getUploadedFiles(user.id)
+            const totalMessages = files?.reduce((sum, file) => sum + (file.message_count || 0), 0) || 0
+            setUserStats({
+              total_messages: totalMessages,
+              accuracy_score: 0,
+              last_trained: null
+            })
+          }
+        } catch (error) {
+          console.error('Error loading user stats:', error)
+        }
+      }
     }
 
-    checkConnection()
-  }, [])
+    initializeData()
+  }, [user])
 
   useEffect(() => {
     scrollToBottom()
@@ -193,15 +217,24 @@ function ChatPageContent() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-600">Training Data</span>
-              <span className="text-black">20,688 messages</span>
+              <span className="text-black">
+                {userStats?.total_messages?.toLocaleString() || '0'} messages
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Accuracy</span>
-              <span className="text-green-600">94%</span>
+              <span className={`${userStats?.accuracy_score > 0.7 ? 'text-green-600' : userStats?.accuracy_score > 0.4 ? 'text-yellow-600' : 'text-gray-600'}`}>
+                {userStats?.accuracy_score ? `${Math.round(userStats.accuracy_score * 100)}%` : '0%'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Last Updated</span>
-              <span className="text-black">2 hours ago</span>
+              <span className="text-black">
+                {userStats?.last_trained
+                  ? new Date(userStats.last_trained).toLocaleDateString()
+                  : 'Never'
+                }
+              </span>
             </div>
           </div>
         </div>

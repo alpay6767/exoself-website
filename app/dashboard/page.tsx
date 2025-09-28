@@ -6,7 +6,7 @@ import { useDropzone } from 'react-dropzone'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLanguage } from '../../context/LanguageContext'
-import { supabase, getCurrentUser, uploadFile, getUploadedFiles, signOut } from '../../lib/supabase'
+import { supabase, getCurrentUser, uploadFile, getUploadedFiles, signOut, getEchoStats } from '../../lib/supabase'
 import AuthGuard, { useAuthGuard } from '../../components/AuthGuard'
 import Header from '../../components/Header'
 import {
@@ -44,6 +44,7 @@ function DashboardPageContent() {
   const [dataSources, setDataSources] = useState<DataSource[]>([])
   const [isTraining, setIsTraining] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [echoStats, setEchoStats] = useState<any>(null)
 
   // Load user-specific data
   useEffect(() => {
@@ -63,6 +64,20 @@ function DashboardPageContent() {
             uploadedAt: new Date(file.created_at).toLocaleDateString()
           }))
           setDataSources(formattedFiles)
+        }
+
+        // Load echo statistics for the current user
+        const { data: stats, error: statsError } = await getEchoStats(user.id)
+        if (!statsError && stats) {
+          setEchoStats(stats)
+        } else {
+          // Create default stats if none exist
+          setEchoStats({
+            total_messages: 0,
+            accuracy_score: 0,
+            last_trained: null,
+            data_sources: []
+          })
         }
       } catch (error) {
         console.error('Error loading user data:', error)
@@ -194,7 +209,11 @@ function DashboardPageContent() {
     }
   }
 
-  const totalMessages = dataSources.reduce((sum, source) => sum + source.messages, 0)
+  // Calculate metrics from real data
+  const totalMessages = echoStats?.total_messages || dataSources.reduce((sum, source) => sum + source.messages, 0)
+  const accuracyScore = echoStats?.accuracy_score ? `${Math.round(echoStats.accuracy_score * 100)}%` : '0%'
+  const echoStatus = totalMessages > 0 ? 'Active' : 'Training'
+  const lastTrained = echoStats?.last_trained ? new Date(echoStats.last_trained).toLocaleDateString() : 'Never'
 
   if (isLoading || authLoading) {
     return (
@@ -231,8 +250,8 @@ function DashboardPageContent() {
             {[
               { label: 'Total Messages', value: totalMessages.toLocaleString(), icon: MessageCircle },
               { label: 'Data Sources', value: dataSources.length.toString(), icon: Upload },
-              { label: 'Accuracy Score', value: '94%', icon: Zap },
-              { label: 'Echo Status', value: 'Active', icon: Brain }
+              { label: 'Accuracy Score', value: accuracyScore, icon: Zap },
+              { label: 'Echo Status', value: echoStatus, icon: Brain }
             ].map((stat, index) => (
               <motion.div
                 key={index}

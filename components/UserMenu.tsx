@@ -73,14 +73,6 @@ export default function UserMenu({ user, showName = false }: UserMenuProps) {
                    user?.identities?.[0]?.identity_data?.avatar_url ||
                    user?.identities?.[0]?.identity_data?.picture
 
-  // Debug: Log user data to console (remove this in production)
-  if (typeof window !== 'undefined' && user) {
-    console.log('User data for avatar:', {
-      user_metadata: user.user_metadata,
-      identities: user.identities,
-      avatarUrl: avatarUrl
-    })
-  }
 
   return (
     <div className="relative" ref={menuRef}>
