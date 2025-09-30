@@ -48,6 +48,19 @@ function ChatPageContent() {
   const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [userStats, setUserStats] = useState<any>(null)
+  const [conversationId, setConversationId] = useState<string>(() => {
+    // Generate persistent conversation ID
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('exoself_conversation_id')
+      if (stored) return stored
+    }
+    const newId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('exoself_conversation_id', newId)
+    }
+    return newId
+  })
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -114,55 +127,102 @@ function ChatPageContent() {
     setIsEchoTyping(true)
     setConnectionError(null)
 
+    const echoMessageId = (Date.now() + 1).toString()
+    setStreamingMessageId(echoMessageId)
+
     try {
       if (isBackendConnected) {
-        // Use real API
-        const response = await apiService.sendChatMessage(userMessage.content)
+        // Use streaming API (Phase 4)
+        let fullResponse = ''
+        let isFirstToken = true
 
-        const echoResponse: Message = {
-          id: (Date.now() + 1).toString(),
-          content: response.response,
-          sender: 'echo',
-          timestamp: new Date()
+        try {
+          const stream = apiService.streamChatMessage(userMessage.content, conversationId)
+
+          for await (const token of stream) {
+            fullResponse += token
+
+            // Add echo message on first token, then update it
+            if (isFirstToken) {
+              const echoMessage: Message = {
+                id: echoMessageId,
+                content: fullResponse,
+                sender: 'echo',
+                timestamp: new Date(),
+                isTyping: true
+              }
+              setMessages(prev => [...prev, echoMessage])
+              isFirstToken = false
+            } else {
+              // Update the message content in real-time
+              setMessages(prev => prev.map(msg =>
+                msg.id === echoMessageId
+                  ? { ...msg, content: fullResponse, isTyping: true }
+                  : msg
+              ))
+            }
+          }
+
+          // Mark streaming complete
+          setMessages(prev => prev.map(msg =>
+            msg.id === echoMessageId
+              ? { ...msg, isTyping: false }
+              : msg
+          ))
+
+          setIsEchoTyping(false)
+          setStreamingMessageId(null)
+
+        } catch (streamError) {
+          console.error('Streaming failed:', streamError)
+          // Fallback to non-streaming
+          const response = await apiService.sendChatMessage(userMessage.content)
+
+          const echoMessage: Message = {
+            id: echoMessageId,
+            content: response.response,
+            sender: 'echo',
+            timestamp: new Date(),
+            isTyping: false
+          }
+          setMessages(prev => [...prev, echoMessage])
+
+          setIsEchoTyping(false)
+          setStreamingMessageId(null)
         }
-
-        setIsEchoTyping(false)
-        setMessages(prev => [...prev, echoResponse])
       } else {
         // Fallback to simulated response
         setTimeout(() => {
-          const echoResponse: Message = {
-            id: (Date.now() + 1).toString(),
-            content: generateEchoResponse(userMessage.content),
+          const simulatedResponse = generateEchoResponse(userMessage.content)
+
+          const echoMessage: Message = {
+            id: echoMessageId,
+            content: simulatedResponse,
             sender: 'echo',
-            timestamp: new Date()
+            timestamp: new Date(),
+            isTyping: false
           }
+          setMessages(prev => [...prev, echoMessage])
 
           setIsEchoTyping(false)
-          setMessages(prev => [...prev, echoResponse])
+          setStreamingMessageId(null)
         }, 1500 + Math.random() * 2000)
       }
     } catch (error) {
+      console.error('Chat error:', error)
       setIsEchoTyping(false)
+      setStreamingMessageId(null)
       setConnectionError('Failed to get response from echo. Please try again.')
 
-      // Add error message to chat
+      // Add error message
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "Sorry, I'm having trouble connecting to my brain right now. The response might be simulated.",
+        id: echoMessageId,
+        content: "Sorry, I'm having trouble connecting to my brain right now. Please try again.",
         sender: 'echo',
-        timestamp: new Date()
+        timestamp: new Date(),
+        isTyping: false
       }
-
-      // Still provide fallback response
-      setTimeout(() => {
-        setMessages(prev => [...prev, errorMessage, {
-          id: (Date.now() + 2).toString(),
-          content: generateEchoResponse(userMessage.content),
-          sender: 'echo',
-          timestamp: new Date()
-        }])
-      }, 1000)
+      setMessages(prev => [...prev, errorMessage])
     }
   }
 
@@ -349,7 +409,9 @@ function ChatPageContent() {
                       ? 'bg-gray-100 border border-gray-200 text-black'
                       : 'bg-blue-500 text-white'
                   }`}>
-                    <p className="leading-relaxed">{message.content}</p>
+                    <p className="leading-relaxed">
+                      {message.content}
+                    </p>
                   </div>
 
                   <div className={`flex items-center gap-2 mt-2 text-xs text-gray-500 ${

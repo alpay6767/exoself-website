@@ -170,19 +170,30 @@ export const saveChatMessage = async (message: Omit<ChatMessage, 'id'>) => {
 
 export const getEchoStats = async (userId: string) => {
   try {
-    const { data, error } = await supabase
-      .from('echo_stats')
-      .select('*')
+    // Get Echo model info (for last_trained timestamp and accuracy)
+    const { data: echoData, error: echoError } = await supabase
+      .from('echo_models')
+      .select('created_at, personality_traits, version')
       .eq('user_id', userId)
+      .eq('is_active', true)
       .single()
 
-    return { data, error }
-  } catch (error: any) {
-    // If table doesn't exist, return default stats
-    if (error?.code === 'PGRST106' || error?.status === 406) {
+    // Get total message count
+    const { count: messageCount, error: countError } = await supabase
+      .from('message_embeddings')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+
+    // Get uploaded files for data sources
+    const { data: files, error: filesError } = await supabase
+      .from('uploaded_files')
+      .select('source_type, original_name')
+      .eq('user_id', userId)
+
+    if (echoError || countError) {
       return {
         data: {
-          total_messages: 0,
+          total_messages: messageCount || 0,
           accuracy_score: 0,
           last_trained: null,
           data_sources: []
@@ -190,6 +201,30 @@ export const getEchoStats = async (userId: string) => {
         error: null
       }
     }
-    return { data: null, error }
+
+    // Calculate a rough accuracy score based on conscientiousness trait
+    const traits = echoData?.personality_traits as any
+    const accuracy_score = traits?.conscientiousness || 0.5
+
+    return {
+      data: {
+        total_messages: messageCount || 0,
+        accuracy_score: accuracy_score,
+        last_trained: echoData?.created_at || null,
+        data_sources: files?.map(f => f.source_type) || [],
+        echo_version: echoData?.version || 1
+      },
+      error: null
+    }
+  } catch (error: any) {
+    return {
+      data: {
+        total_messages: 0,
+        accuracy_score: 0,
+        last_trained: null,
+        data_sources: []
+      },
+      error
+    }
   }
 }

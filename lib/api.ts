@@ -87,7 +87,7 @@ class ApiService {
     }
   }
 
-  // Chat with the Echo
+  // Chat with the Echo (non-streaming)
   async sendChatMessage(message: string, userId?: string): Promise<ChatResponse> {
     const response = await this.request<any>('/backend', {
       method: 'POST',
@@ -103,6 +103,91 @@ class ApiService {
       confidence: 0.8,
       timestamp: new Date().toISOString()
     }
+  }
+
+  // Chat with Echo using streaming (Phase 4)
+  async *streamChatMessage(
+    message: string,
+    conversationId?: string
+  ): AsyncGenerator<string, void, unknown> {
+    const authHeaders = await this.getAuthHeaders()
+
+    // Connect directly to Python backend for streaming
+    const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
+    const response = await fetch(`${BACKEND_URL}/api/v1/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        message,
+        stream: true,
+        conversation_id: conversationId
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Streaming failed: ${response.status}`)
+    }
+
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+
+    if (!reader) {
+      throw new Error('No response body')
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)  // Don't trim - preserves spaces!
+
+            if (data.trim() === '[DONE]') {
+              return
+            }
+
+            // Yield data even if it's just whitespace (important for spaces between words)
+            if (data.length > 0) {
+              yield data
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
+  // Get chat history
+  async getChatHistory(conversationId?: string, limit: number = 50): Promise<any[]> {
+    const authHeaders = await this.getAuthHeaders()
+    const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
+    let url = `${BACKEND_URL}/api/v1/chat/history?limit=${limit}`
+    if (conversationId) {
+      url += `&conversation_id=${conversationId}`
+    }
+
+    const response = await fetch(url, {
+      headers: authHeaders,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch history: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data.messages || []
   }
 
   // Upload files for processing
